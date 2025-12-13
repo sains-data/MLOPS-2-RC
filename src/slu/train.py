@@ -239,7 +239,18 @@ def main(
     device = torch.device("cuda" if torch.cuda.is_available() and train_conf.get("device", "auto") != "cpu" else "cpu")
 
     wandb_conf = train_conf.get("wandb", {})
-    use_wandb = bool(wandb_conf.get("enable", False) and wandb is not None)
+    env_mode = os.getenv("WANDB_MODE", "").lower()
+    env_disabled = os.getenv("WANDB_DISABLED", "").lower() == "true"
+    env_key = os.getenv("WANDB_API_KEY")
+    can_offline = env_mode in {"offline", "dryrun", "disabled"}
+    use_wandb = bool(
+        wandb_conf.get("enable", False)
+        and wandb is not None
+        and not env_disabled
+        and (env_key or can_offline)
+    )
+    if wandb_conf.get("enable", False) and not use_wandb:
+        print("[wandb] disabled: no API key and not in offline/dryrun mode; set WANDB_MODE=offline to enable")
 
     # load data
     df = torch.tensor([])
@@ -318,6 +329,7 @@ def main(
                 "max_epochs": train_conf.get("max_epochs", 30),
                 "augment": train_conf.get("augment", {}),
             },
+            mode=env_mode if env_mode else None,
             settings=wandb.Settings(start_method="thread"),
         )
 

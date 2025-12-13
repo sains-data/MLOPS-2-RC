@@ -21,5 +21,8 @@ jobs:
         run: |
           python -m py_compile $(find src -name "*.py")
       - name: Test
+        env:
+          WANDB_MODE: offline
+          WANDB_DISABLED: "true"
         run: |
           pytest -q
