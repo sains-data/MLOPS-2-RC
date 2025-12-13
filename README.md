@@ -2,6 +2,12 @@
 
 Kerangka tugas besar MLOps untuk SLU retail (produk & quantity) tanpa intent. Fokus pada reproducible pipeline, experiment tracking sederhana, CI, dan API inference (tanpa Docker).
 
+### Kenapa ada Typer?
+- Typer adalah library Python untuk bikin CLI dengan type hints sehingga argumen otomatis punya help/validasi.
+- Dipakai supaya semua langkah pipeline (ingest → preprocess → train → evaluate → hparam-search) konsisten lewat satu perintah `slu ...`, tanpa mengingat modul/flag terpisah.
+- Jalankan `slu --help` atau `slu train --help` untuk melihat opsi yang tersedia.
+- Kalau entrypoint `slu` belum terdaftar, jalankan lewat `python -m slu.cli ...` (fungsi sama).
+
 ## Dataset & Artefak
 - Sumber metadata/label: `metadata-google-tts.csv`, `metadata-google-tts-split.csv`, `label_final_revisi-manual.csv` (taruh di direktori induk repo ini).
 - Output ingest: `data/processed/metadata.csv` dan label maps (`product2id.json`, `qty2id.json`).
@@ -63,16 +69,22 @@ pip install -r requirements.txt
 # (opsional lebih rapi) install editable supaya modul `slu` dikenali
 pip install -e .
 
-# 1) Ingest
-python -m slu.data_ingest --config configs/data.yaml
+# 1) Ingest (gabung metadata + label map)
+slu ingest --config configs/data.yaml
 
-# 2) Preprocess
-python -m slu.preprocess --metadata data/processed/metadata.csv --cfg configs/preprocess.yaml
+# 2) Preprocess (extract log-mel)
+slu preprocess --metadata data/processed/metadata.csv --config configs/preprocess.yaml
 
-# 3) Train (stub, lengkapi loop)
-python -m slu.train --model_cfg configs/model_m1.yaml
+# 3) Train
+slu train --model-cfg configs/model_m1.yaml --train-cfg configs/train.yaml
 
-# 4) API
+# 4) Evaluate
+slu evaluate --metadata-features data/processed/metadata_features.csv
+
+# 5) Optuna search (opsional)
+slu hparam-search --n-trials 5
+
+# 6) API
 uvicorn api.app:app --reload
 ```
 

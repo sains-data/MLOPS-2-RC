@@ -103,30 +103,28 @@ def evaluate_model(
     return stats, y_true_prod, y_pred_prod, y_true_qty, y_pred_qty
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--registry", default="artifacts/registry/latest.json")
-    parser.add_argument("--metadata_features", default="data/processed/metadata_features.csv")
-    parser.add_argument("--data_cfg", default="configs/data.yaml")
-    parser.add_argument("--preprocess_cfg", default="configs/preprocess.yaml")
-    parser.add_argument("--model_cfg", default=None)
-    parser.add_argument("--train_cfg", default="configs/train.yaml")
-    parser.add_argument("--metrics_path", default="artifacts/metrics.json")
-    parser.add_argument("--confusion_product", default="artifacts/confusion_product.png")
-    parser.add_argument("--confusion_quantity", default="artifacts/confusion_qty.png")
-    parser.add_argument("--report_path", default="artifacts/classification_report.txt")
-    parser.add_argument("--val_ratio", type=float, default=0.1)
-    parser.add_argument("--seed", type=int, default=42)
-    args = parser.parse_args()
-
-    registry_path = Path(args.registry)
+def run_evaluation(
+    registry: str = "artifacts/registry/latest.json",
+    metadata_features: str = "data/processed/metadata_features.csv",
+    data_cfg: str = "configs/data.yaml",
+    preprocess_cfg: str = "configs/preprocess.yaml",
+    model_cfg: str | None = None,
+    train_cfg: str = "configs/train.yaml",
+    metrics_path: str = "artifacts/metrics.json",
+    confusion_product: str = "artifacts/confusion_product.png",
+    confusion_quantity: str = "artifacts/confusion_qty.png",
+    report_path: str = "artifacts/classification_report.txt",
+    val_ratio: float = 0.1,
+    seed: int = 42,
+):
+    registry_path = Path(registry)
     registry_path.parent.mkdir(parents=True, exist_ok=True)
     registry_data = json.loads(registry_path.read_text()) if registry_path.exists() else {}
 
-    model_cfg_path = Path(args.model_cfg or registry_data.get("config_path", "configs/model_m1.yaml"))
-    data_cfg_path = Path(args.data_cfg)
-    preprocess_cfg_path = Path(args.preprocess_cfg)
-    train_cfg_path = Path(args.train_cfg)
+    model_cfg_path = Path(model_cfg or registry_data.get("config_path", "configs/model_m1.yaml"))
+    data_cfg_path = Path(data_cfg)
+    preprocess_cfg_path = Path(preprocess_cfg)
+    train_cfg_path = Path(train_cfg)
 
     model_path = Path(registry_data.get("model_path", "artifacts/best_model.pt"))
     product_map_path = Path(registry_data.get("label_map_product", "data/processed/product2id.json"))
@@ -139,14 +137,14 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() and train_conf.get("device", "auto") != "cpu" else "cpu")
 
-    df = pd.read_csv(args.metadata_features)
+    df = pd.read_csv(metadata_features)
     if "feature_path" not in df.columns:
         raise ValueError("metadata_features.csv harus memiliki kolom feature_path")
 
     product_map = load_label_map(product_map_path)
     qty_map = load_label_map(qty_map_path)
 
-    _, val_df = split_train_val(df, val_ratio=args.val_ratio, seed=args.seed)
+    _, val_df = split_train_val(df, val_ratio=val_ratio, seed=seed)
 
     val_ds = LogMelDataset(val_df, "feature_path", product_map, qty_map)
     val_loader = torch.utils.data.DataLoader(
@@ -179,8 +177,8 @@ def main():
     cm_prod = confusion_matrix(y_true_prod, y_pred_prod, labels=list(range(len(labels_prod))))
     cm_qty = confusion_matrix(y_true_qty, y_pred_qty, labels=list(range(len(labels_qty))))
 
-    plot_confusion(cm_prod, labels_prod, Path(args.confusion_product), "Confusion Matrix - Product")
-    plot_confusion(cm_qty, labels_qty, Path(args.confusion_quantity), "Confusion Matrix - Quantity")
+    plot_confusion(cm_prod, labels_prod, Path(confusion_product), "Confusion Matrix - Product")
+    plot_confusion(cm_qty, labels_qty, Path(confusion_quantity), "Confusion Matrix - Quantity")
 
     f1_prod = f1_score(y_true_prod, y_pred_prod, average="macro") if y_true_prod else 0.0
     f1_qty = f1_score(y_true_qty, y_pred_qty, average="macro") if y_true_qty else 0.0
@@ -193,13 +191,13 @@ def main():
         "f1_quantity": f1_qty,
     }
 
-    Path(args.metrics_path).parent.mkdir(parents=True, exist_ok=True)
-    with open(args.metrics_path, "w", encoding="utf-8") as f:
+    Path(metrics_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(metrics_path, "w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=2)
 
     report_prod = classification_report(y_true_prod, y_pred_prod, target_names=labels_prod, zero_division=0)
     report_qty = classification_report(y_true_qty, y_pred_qty, target_names=labels_qty, zero_division=0)
-    report_path = Path(args.report_path)
+    report_path = Path(report_path)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(
         "Product head\n" + report_prod + "\n\nQuantity head\n" + report_qty + "\n", encoding="utf-8"
@@ -215,15 +213,47 @@ def main():
         "label_map_quantity": str(qty_map_path.as_posix()),
         "metrics": metrics,
         "artifacts": {
-            "metrics": str(Path(args.metrics_path).as_posix()),
-            "confusion_product": str(Path(args.confusion_product).as_posix()),
-            "confusion_quantity": str(Path(args.confusion_quantity).as_posix()),
+            "metrics": str(Path(metrics_path).as_posix()),
+            "confusion_product": str(Path(confusion_product).as_posix()),
+            "confusion_quantity": str(Path(confusion_quantity).as_posix()),
             "classification_report": str(report_path.as_posix()),
         },
     }
     registry_path.write_text(json.dumps(registry_payload, indent=2), encoding="utf-8")
 
     print(json.dumps(metrics, indent=2))
+
+
+def main(cli_args: list[str] | None = None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--registry", default="artifacts/registry/latest.json")
+    parser.add_argument("--metadata_features", default="data/processed/metadata_features.csv")
+    parser.add_argument("--data_cfg", default="configs/data.yaml")
+    parser.add_argument("--preprocess_cfg", default="configs/preprocess.yaml")
+    parser.add_argument("--model_cfg", default=None)
+    parser.add_argument("--train_cfg", default="configs/train.yaml")
+    parser.add_argument("--metrics_path", default="artifacts/metrics.json")
+    parser.add_argument("--confusion_product", default="artifacts/confusion_product.png")
+    parser.add_argument("--confusion_quantity", default="artifacts/confusion_qty.png")
+    parser.add_argument("--report_path", default="artifacts/classification_report.txt")
+    parser.add_argument("--val_ratio", type=float, default=0.1)
+    parser.add_argument("--seed", type=int, default=42)
+    args = parser.parse_args(cli_args)
+
+    run_evaluation(
+        registry=args.registry,
+        metadata_features=args.metadata_features,
+        data_cfg=args.data_cfg,
+        preprocess_cfg=args.preprocess_cfg,
+        model_cfg=args.model_cfg,
+        train_cfg=args.train_cfg,
+        metrics_path=args.metrics_path,
+        confusion_product=args.confusion_product,
+        confusion_quantity=args.confusion_quantity,
+        report_path=args.report_path,
+        val_ratio=args.val_ratio,
+        seed=args.seed,
+    )
 
 
 if __name__ == "__main__":

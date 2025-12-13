@@ -100,33 +100,31 @@ def run_trial(trial, cfg_paths: dict) -> float:
     return best_val
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--n_trials", type=int, default=10)
-    parser.add_argument("--study_name", default="slu-optuna")
-    parser.add_argument("--storage", default=None, help="Optuna storage URL if you want persistence (e.g., sqlite:///optuna.db)")
-    parser.add_argument("--data_cfg", default="configs/data.yaml")
-    parser.add_argument("--model_cfg", default="configs/model_m1.yaml")
-    parser.add_argument("--train_cfg", default="configs/train.yaml")
-    parser.add_argument("--metadata_features", default="data/processed/metadata_features.csv")
-    parser.add_argument("--max_epochs", type=int, default=15)
-    args = parser.parse_args()
-
+def run_hparam_search(
+    n_trials: int = 10,
+    study_name: str = "slu-optuna",
+    storage: str | None = None,
+    data_cfg: str = "configs/data.yaml",
+    model_cfg: str = "configs/model_m1.yaml",
+    train_cfg: str = "configs/train.yaml",
+    metadata_features: str = "data/processed/metadata_features.csv",
+    max_epochs: int = 15,
+):
     cfg_paths = {
-        "data_cfg": Path(args.data_cfg),
-        "model_cfg": Path(args.model_cfg),
-        "train_cfg": Path(args.train_cfg),
-        "metadata_features": args.metadata_features,
-        "max_epochs": args.max_epochs,
+        "data_cfg": Path(data_cfg),
+        "model_cfg": Path(model_cfg),
+        "train_cfg": Path(train_cfg),
+        "metadata_features": metadata_features,
+        "max_epochs": max_epochs,
     }
 
     study = optuna.create_study(
-        study_name=args.study_name,
-        storage=args.storage,
+        study_name=study_name,
+        storage=storage,
         direction="minimize",
         load_if_exists=True,
     )
-    study.optimize(lambda t: run_trial(t, cfg_paths), n_trials=args.n_trials)
+    study.optimize(lambda t: run_trial(t, cfg_paths), n_trials=n_trials)
 
     print("Best trial:")
     best = study.best_trial
@@ -134,6 +132,32 @@ def main():
     print("  Params:")
     for k, v in best.params.items():
         print(f"    {k}: {v}")
+
+
+def main(cli_args: list[str] | None = None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--n_trials", type=int, default=10)
+    parser.add_argument("--study_name", default="slu-optuna")
+    parser.add_argument(
+        "--storage", default=None, help="Optuna storage URL if you want persistence (e.g., sqlite:///optuna.db)"
+    )
+    parser.add_argument("--data_cfg", default="configs/data.yaml")
+    parser.add_argument("--model_cfg", default="configs/model_m1.yaml")
+    parser.add_argument("--train_cfg", default="configs/train.yaml")
+    parser.add_argument("--metadata_features", default="data/processed/metadata_features.csv")
+    parser.add_argument("--max_epochs", type=int, default=15)
+    args = parser.parse_args(cli_args)
+
+    run_hparam_search(
+        n_trials=args.n_trials,
+        study_name=args.study_name,
+        storage=args.storage,
+        data_cfg=args.data_cfg,
+        model_cfg=args.model_cfg,
+        train_cfg=args.train_cfg,
+        metadata_features=args.metadata_features,
+        max_epochs=args.max_epochs,
+    )
 
 
 if __name__ == "__main__":
