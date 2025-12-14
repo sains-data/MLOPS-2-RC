@@ -1,0 +1,7 @@
+{
+  "rows": 24,
+  "latency_ms_mean": 1939.6116666666665,
+  "latency_ms_p95": 7092.1705,
+  "audio_duration_mean": NaN,
+  "confidence_mean": 0.5201289407584978
+}
