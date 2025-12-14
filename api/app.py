@@ -13,8 +13,9 @@ import torch
 import yaml
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 
-from .schema import HealthResponse, PredictResponse
+from .schema import HealthResponse, PrediksiResponse
 from slu.models.m1_cnn_transformer import CNNTransformerSLU
 from slu.models.m2_transformer_tiny import TransformerTinySLU
 
@@ -25,7 +26,13 @@ DEFAULT_PREPROCESS_CFG = PROJECT_ROOT / "configs" / "preprocess.yaml"
 LOG_DIR = PROJECT_ROOT / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="SLU Inference API")
+app = FastAPI(
+    title="SLU Inference API — Kelompok 2 RC",
+    description=(
+        "API inferensi Spoken Language Understanding (SLU) untuk memprediksi produk dan kuantitas dari audio. "
+        "Proyek Tugas Besar Mata Kuliah Machine Learning Operations."
+    ),
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -33,6 +40,208 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/", response_class=HTMLResponse)
+def homepage() -> HTMLResponse:
+    return HTMLResponse(
+                """
+                <!doctype html>
+                <html lang="id">
+                    <head>
+                        <meta charset="utf-8" />
+                        <meta name="viewport" content="width=device-width, initial-scale=1" />
+                        <title>SLU Inference API — Kelompok 2 RC</title>
+                        <style>
+                            :root { color-scheme: light dark; font-family: 'Segoe UI', Arial, sans-serif; }
+                            body { margin: 0; padding: 24px; background: #0b1021; color: #e6e9f2; }
+                            .card { max-width: 720px; margin: 0 auto; background: #111831; border: 1px solid #1f2a4d; border-radius: 14px; padding: 24px; box-shadow: 0 8px 30px rgba(0,0,0,0.35); }
+                            h1 { margin-top: 0; font-size: 24px; letter-spacing: 0.3px; }
+                            p { color: #c8cede; line-height: 1.5; }
+                            .section { margin-top: 18px; padding: 14px; border: 1px dashed #2c3c66; border-radius: 10px; background: #0d142a; }
+                            label { display: block; margin-bottom: 8px; font-weight: 600; }
+                            input[type="file"], button { font-size: 14px; }
+                            button { cursor: pointer; border: none; border-radius: 10px; padding: 10px 14px; background: linear-gradient(135deg, #5dd4ff, #7b7bff); color: #0b1021; font-weight: 700; }
+                            button:disabled { opacity: 0.6; cursor: not-allowed; }
+                            .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+                            .status { margin-top: 10px; font-family: 'Consolas', monospace; background: #0a1125; padding: 10px; border-radius: 10px; border: 1px solid #1d2d52; white-space: pre-wrap; word-break: break-word; }
+                            .links a { color: #7bd7ff; text-decoration: none; }
+                            .links a:hover { text-decoration: underline; }
+                        </style>
+                    </head>
+                    <body>
+                        <div class="card">
+                            <h1>SLU Inference API — Kelompok 2 RC</h1>
+                            <p>Halaman ini untuk mencoba <em>online inference</em> dengan mengunggah audio (atau merekam dari mikrofon). Permintaan akan memanggil endpoint <code>/predict</code> yang sama seperti saat deployment.</p>
+                            <div class="section">
+                                <strong>Identitas Kelompok</strong>
+                                <p style="margin: 10px 0 0 0;">
+                                    <b>Kelompok 2 RC</b><br/>
+                                    Anggota:
+                                </p>
+                                <ol style="margin: 8px 0 0 18px; color: #c8cede; line-height: 1.6;">
+                                    <li>Gymnastiar Al Khoarizmy (122450096)</li>
+                                    <li>Diana Syafithri (122450141)</li>
+                                    <li>Eksanty F Islamiaty (122450001)</li>
+                                    <li>dhea amelia putri (122450004)</li>
+                                </ol>
+                            </div>
+
+
+                            <div class="section">
+                                <label for="file">Unggah audio (wav/mp3/flac)</label>
+                                <div class="row">
+                                    <input id="file" type="file" accept="audio/*" />
+                                    <button id="uploadBtn">Prediksi</button>
+                                </div>
+                            </div>
+
+                            <div class="section">
+                                <label>Rekam dari Mikrofon</label>
+                                <div class="row">
+                                    <button id="recordBtn">Mulai Rekam</button>
+                                    <button id="stopBtn" disabled>Stop & Prediksi</button>
+                                    <span id="recStatus">Idle</span>
+                                </div>
+                            </div>
+
+                            <div class="section">
+                                <strong>Hasil</strong>
+                                <div id="result" class="status">Menunggu input...</div>
+                                <div class="row" style="margin-top: 10px;">
+                                    <button id="resetBtn">Reset</button>
+                                    <span style="font-size: 12px; color: #9aa6c6;">Reset akan menghentikan rekaman, mengosongkan input, dan membersihkan hasil.</span>
+                                </div>
+                            </div>
+
+                            <p class="links">Dokumentasi: <a href="/docs">/docs</a> · OpenAPI: <a href="/openapi.json">/openapi.json</a></p>
+                        </div>
+
+                        <script>
+                            const resultBox = document.getElementById('result');
+                            const uploadBtn = document.getElementById('uploadBtn');
+                            const fileInput = document.getElementById('file');
+                            const recordBtn = document.getElementById('recordBtn');
+                            const stopBtn = document.getElementById('stopBtn');
+                            const resetBtn = document.getElementById('resetBtn');
+                            const recStatus = document.getElementById('recStatus');
+                            let mediaRecorder = null;
+                            let chunks = [];
+                            let mediaStream = null;
+
+                            async function blobToWav(blob) {
+                                const arrayBuf = await blob.arrayBuffer();
+                                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                                const audioBuf = await audioCtx.decodeAudioData(arrayBuf);
+                                const { numberOfChannels, sampleRate, length } = audioBuf;
+                                const interleaved = new Float32Array(length * numberOfChannels);
+                                for (let ch = 0; ch < numberOfChannels; ch++) {
+                                    interleaved.set(audioBuf.getChannelData(ch), ch * length);
+                                }
+                                const wavBuf = new ArrayBuffer(44 + interleaved.length * 2);
+                                const view = new DataView(wavBuf);
+                                function writeString(v, offset, str) { for (let i = 0; i < str.length; i++) v.setUint8(offset + i, str.charCodeAt(i)); }
+                                writeString(view, 0, 'RIFF');
+                                view.setUint32(4, 36 + interleaved.length * 2, true);
+                                writeString(view, 8, 'WAVE');
+                                writeString(view, 12, 'fmt ');
+                                view.setUint32(16, 16, true);
+                                view.setUint16(20, 1, true);
+                                view.setUint16(22, numberOfChannels, true);
+                                view.setUint32(24, sampleRate, true);
+                                view.setUint32(28, sampleRate * numberOfChannels * 2, true);
+                                view.setUint16(32, numberOfChannels * 2, true);
+                                view.setUint16(34, 16, true);
+                                writeString(view, 36, 'data');
+                                view.setUint32(40, interleaved.length * 2, true);
+                                let offset = 44;
+                                for (let i = 0; i < interleaved.length; i++, offset += 2) {
+                                    let s = Math.max(-1, Math.min(1, interleaved[i]));
+                                    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+                                }
+                                return new Blob([view], { type: 'audio/wav' });
+                            }
+
+                            async function sendAudio(blob) {
+                                resultBox.textContent = 'Mengunggah...';
+                                const form = new FormData();
+                                const wavBlob = await blobToWav(blob);
+                                form.append('file', wavBlob, 'audio.wav');
+                                try {
+                                    const res = await fetch('/predict', { method: 'POST', body: form });
+                                    if (!res.ok) throw new Error(await res.text());
+                                    const data = await res.json();
+                                    resultBox.textContent = JSON.stringify(data, null, 2);
+                                } catch (err) {
+                                    resultBox.textContent = `Error: ${err}`;
+                                }
+                            }
+
+                            uploadBtn.addEventListener('click', () => {
+                                if (!fileInput.files.length) {
+                                    resultBox.textContent = 'Silakan pilih file audio terlebih dahulu.';
+                                    return;
+                                }
+                                sendAudio(fileInput.files[0]);
+                            });
+
+                            recordBtn.addEventListener('click', async () => {
+                                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                                    resultBox.textContent = 'Perekaman tidak didukung di browser ini.';
+                                    return;
+                                }
+                                try {
+                                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                                    mediaStream = stream;
+                                    chunks = [];
+                                    mediaRecorder = new MediaRecorder(stream);
+                                    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+                                    mediaRecorder.onstop = () => {
+                                        const blob = new Blob(chunks, { type: 'audio/webm' });
+                                        sendAudio(blob);
+                                        stream.getTracks().forEach(t => t.stop());
+                                        mediaStream = null;
+                                    };
+                                    mediaRecorder.start();
+                                    recStatus.textContent = 'Merekam...';
+                                    recordBtn.disabled = true;
+                                    stopBtn.disabled = false;
+                                } catch (err) {
+                                    resultBox.textContent = `Tidak bisa mulai merekam: ${err}`;
+                                }
+                            });
+
+                            stopBtn.addEventListener('click', () => {
+                                if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                                    mediaRecorder.stop();
+                                    recStatus.textContent = 'Memproses...';
+                                    recordBtn.disabled = false;
+                                    stopBtn.disabled = true;
+                                }
+                            });
+
+                            function resetAll() {
+                                if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                                    mediaRecorder.stop();
+                                }
+                                if (mediaStream) {
+                                    mediaStream.getTracks().forEach(t => t.stop());
+                                    mediaStream = null;
+                                }
+                                chunks = [];
+                                fileInput.value = '';
+                                recStatus.textContent = 'Idle';
+                                recordBtn.disabled = false;
+                                stopBtn.disabled = true;
+                                resultBox.textContent = 'Menunggu input...';
+                            }
+
+                            resetBtn.addEventListener('click', resetAll);
+                        </script>
+                    </body>
+                </html>
+                """
+        )
 
 
 def load_yaml(path: Path) -> dict:
@@ -83,14 +292,19 @@ def build_model(model_cfg_path: Path, num_products: int, num_quantities: int) ->
 @lru_cache(maxsize=1)
 def load_model_cached() -> Tuple[torch.nn.Module, dict, dict, dict, dict]:
     reg = load_registry()
-    model_path = PROJECT_ROOT / reg["model_path"] if not Path(reg["model_path"]).is_absolute() else Path(reg["model_path"])
-    config_path = PROJECT_ROOT / reg["config_path"] if not Path(reg["config_path"]).is_absolute() else Path(reg["config_path"])
-    label_map_path = PROJECT_ROOT / reg["label_map_path"] if not Path(reg["label_map_path"]).is_absolute() else Path(reg["label_map_path"])
+    model_path_raw = reg.get("model_path")
+    config_path_raw = reg.get("config_path")
+    product_map_raw = reg.get("label_map_product")
+    qty_map_raw = reg.get("label_map_quantity")
 
-    # label_map_path expected to contain product2id and qty2id
-    label_dir = label_map_path.parent
-    product_map_path = label_dir / "product2id.json"
-    qty_map_path = label_dir / "qty2id.json"
+    if not (model_path_raw and config_path_raw and product_map_raw and qty_map_raw):
+        raise RuntimeError("Registry missing required keys: model_path, config_path, label_map_product, label_map_quantity")
+
+    model_path = PROJECT_ROOT / model_path_raw if not Path(model_path_raw).is_absolute() else Path(model_path_raw)
+    config_path = PROJECT_ROOT / config_path_raw if not Path(config_path_raw).is_absolute() else Path(config_path_raw)
+    product_map_path = PROJECT_ROOT / product_map_raw if not Path(product_map_raw).is_absolute() else Path(product_map_raw)
+    qty_map_path = PROJECT_ROOT / qty_map_raw if not Path(qty_map_raw).is_absolute() else Path(qty_map_raw)
+
     product_map, qty_map, inv_product, inv_qty = load_label_maps(product_map_path, qty_map_path)
 
     model = build_model(config_path, num_products=len(product_map), num_quantities=len(qty_map))
@@ -170,9 +384,19 @@ def health() -> HealthResponse:
     return HealthResponse(status="ok")
 
 
-@app.post("/predict", response_model=PredictResponse)
-async def predict(file: UploadFile = File(...)) -> PredictResponse:
-    if file.content_type not in {"audio/wav", "audio/x-wav", "audio/mpeg", "audio/flac", "audio/mp3", "audio/wave"}:
+@app.post("/predict", response_model=PrediksiResponse)
+async def predict(file: UploadFile = File(...)) -> PrediksiResponse:
+    allowed_types = {
+        "audio/wav",
+        "audio/x-wav",
+        "audio/mpeg",
+        "audio/flac",
+        "audio/mp3",
+        "audio/wave",
+        "audio/webm",
+        "audio/ogg",
+    }
+    if file.content_type not in allowed_types:
         raise HTTPException(status_code=400, detail="Unsupported audio type")
     data = await file.read()
     t0 = time.perf_counter()
@@ -201,4 +425,4 @@ async def predict(file: UploadFile = File(...)) -> PredictResponse:
             }
         )
         raise HTTPException(status_code=400, detail=f"Inference failed: {exc}")
-    return PredictResponse(product=result["product"], quantity=result["quantity"], confidence=result["confidence"])
+    return PrediksiResponse(product=result["product"], quantity=result["quantity"], confidence=result["confidence"])

@@ -11,3 +11,11 @@ class PredictResponse(BaseModel):
     product: str
     quantity: str
     confidence: float | None = None
+
+
+class PrediksiResponse(BaseModel):
+    """Alias Bahasa Indonesia untuk respons prediksi."""
+
+    product: str
+    quantity: str
+    confidence: float | None = None
