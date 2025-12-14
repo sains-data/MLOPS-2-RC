@@ -13,9 +13,10 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python deps first for layer caching
+# Install Python deps first for layer caching (CPU-only torch wheel)
 COPY requirements.txt ./
-RUN pip install -r requirements.txt
+RUN PIP_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu \
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy project
 COPY . .
