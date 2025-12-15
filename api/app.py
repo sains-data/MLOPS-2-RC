@@ -12,7 +12,7 @@ import librosa
 import numpy as np
 import torch
 import yaml
-from fastapi import FastAPI, UploadFile, File, HTTPException, Response
+from fastapi import FastAPI, UploadFile, File, HTTPException, Response, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Summary, generate_latest
@@ -22,16 +22,16 @@ from slu.models.m1_cnn_transformer import CNNTransformerSLU
 from slu.models.m2_transformer_tiny import TransformerTinySLU
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-REGISTRY_PATH = PROJECT_ROOT / "artifacts" / "registry" / "latest.json"
+REGISTRY_DIR = PROJECT_ROOT / "artifacts" / "registry"
 DEFAULT_PREPROCESS_CFG = PROJECT_ROOT / "configs" / "preprocess.yaml"
 
 LOG_DIR = PROJECT_ROOT / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
-# Prometheus metrics
-REQUEST_COUNTER = Counter("predict_requests_total", "Total predict requests")
-REQUEST_ERRORS = Counter("predict_errors_total", "Total predict errors")
-REQUEST_LATENCY = Summary("predict_latency_seconds", "Predict latency seconds")
+# Prometheus metrics (labeled by model)
+REQUEST_COUNTER = Counter("predict_requests_total", "Total predict requests", ["model"])
+REQUEST_ERRORS = Counter("predict_errors_total", "Total predict errors", ["model"])
+REQUEST_LATENCY = Summary("predict_latency_seconds", "Predict latency seconds", ["model"])
 
 app = FastAPI(
     title="SLU Inference API — Kelompok 2 RC",
@@ -256,11 +256,12 @@ def load_yaml(path: Path) -> dict:
         return yaml.safe_load(f)
 
 
-@lru_cache(maxsize=1)
-def load_registry() -> dict:
-    if not REGISTRY_PATH.exists():
-        raise RuntimeError(f"Registry not found: {REGISTRY_PATH}")
-    return json.loads(REGISTRY_PATH.read_text())
+@lru_cache(maxsize=2)
+def load_registry(model_key: str) -> dict:
+    registry_path = REGISTRY_DIR / f"{model_key}.json"
+    if not registry_path.exists():
+        raise RuntimeError(f"Registry not found for model '{model_key}': {registry_path}")
+    return json.loads(registry_path.read_text())
 
 
 @lru_cache(maxsize=1)
@@ -296,9 +297,9 @@ def build_model(model_cfg_path: Path, num_products: int, num_quantities: int) ->
     return model
 
 
-@lru_cache(maxsize=1)
-def load_model_cached() -> Tuple[torch.nn.Module, dict, dict, dict, dict]:
-    reg = load_registry()
+@lru_cache(maxsize=2)
+def load_model_cached(model_key: str) -> Tuple[torch.nn.Module, dict, dict, dict, dict]:
+    reg = load_registry(model_key)
     model_path_raw = reg.get("model_path")
     config_path_raw = reg.get("config_path")
     product_map_raw = reg.get("label_map_product")
@@ -357,8 +358,8 @@ def load_audio_to_logmel(data: bytes, preprocess_cfg: Path = DEFAULT_PREPROCESS_
     return logmel.astype(np.float32), frames, duration
 
 
-def infer(logmel: np.ndarray):
-    model, device, _, _, inv_maps = load_model_cached()
+def infer(logmel: np.ndarray, model_key: str):
+    model, device, _, _, inv_maps = load_model_cached(model_key)
     tensor = torch.from_numpy(logmel).unsqueeze(0).unsqueeze(0).to(device)
     lengths = torch.tensor([logmel.shape[1]], device=device)
     with torch.no_grad():
@@ -392,9 +393,19 @@ def health() -> HealthResponse:
 
 
 @app.post("/predict", response_model=PrediksiResponse)
-async def predict(file: UploadFile = File(...)) -> PrediksiResponse:
+async def predict(
+    file: UploadFile = File(...),
+    model_version: str | None = Query(None, description="Pilih model: m1 atau m2"),
+    model_header: str | None = Header(None, alias="X-Model-Version"),
+) -> PrediksiResponse:
     request_id = str(uuid.uuid4())
-    reg = load_registry()
+    model_key = (model_version or model_header or "m1").lower()
+    if model_key not in {"m1", "m2"}:
+        raise HTTPException(status_code=400, detail="model_version must be m1 or m2")
+    try:
+        reg = load_registry(model_key)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     allowed_types = {
         "audio/wav",
         "audio/x-wav",
@@ -411,10 +422,10 @@ async def predict(file: UploadFile = File(...)) -> PrediksiResponse:
     t0 = time.perf_counter()
     try:
         logmel, frames, duration = load_audio_to_logmel(data)
-        result = infer(logmel)
+        result = infer(logmel, model_key=model_key)
         latency = time.perf_counter() - t0
-        REQUEST_COUNTER.inc()
-        REQUEST_LATENCY.observe(latency)
+        REQUEST_COUNTER.labels(model_key).inc()
+        REQUEST_LATENCY.labels(model_key).observe(latency)
         log_event(
             {
                 "event": "predict",
@@ -428,18 +439,20 @@ async def predict(file: UploadFile = File(...)) -> PrediksiResponse:
                 "product": result["product"],
                 "quantity": result["quantity"],
                 "confidence": result["confidence"],
-                "model_version": reg.get("model_path", "unknown"),
+                "model_version": model_key,
+                "model_path": reg.get("model_path", "unknown"),
             }
         )
     except Exception as exc:  # pragma: no cover
         latency = time.perf_counter() - t0
-        REQUEST_ERRORS.inc()
+        REQUEST_ERRORS.labels(model_key).inc()
         log_event(
             {
                 "event": "predict",
                 "request_id": request_id,
                 "status": "error",
                 "latency_ms": round(latency * 1000, 2),
+                "model_version": model_key,
                 "error": str(exc),
             }
         )

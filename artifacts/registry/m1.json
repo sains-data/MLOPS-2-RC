@@ -1,0 +1,22 @@
+{
+  "model_path": "artifacts/m1_best/best_model.pt",
+  "config_path": "configs/model_m1.yaml",
+  "data_cfg": "configs/data.yaml",
+  "preprocess_cfg": "configs/preprocess.yaml",
+  "train_cfg": "configs/train_m1_best.yaml",
+  "label_map_product": "data/processed/product2id.json",
+  "label_map_quantity": "data/processed/qty2id.json",
+  "metrics": {
+    "val_loss": 1.573455299139023,
+    "acc_product": 0.68,
+    "acc_quantity": 0.71,
+    "f1_product": 0.676456043956044,
+    "f1_quantity": 0.7035880135454604
+  },
+  "artifacts": {
+    "metrics": "artifacts/m1_best/metrics.json",
+    "confusion_product": "artifacts/m1_best/confusion_product.png",
+    "confusion_quantity": "artifacts/m1_best/confusion_qty.png",
+    "classification_report": "artifacts/m1_best/classification_report.txt"
+  }
+}

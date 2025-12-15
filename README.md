@@ -77,7 +77,8 @@ pip install -e .   # optional for editable import slu
 - Run local: `uvicorn api.app:app --host 0.0.0.0 --port 8000 --reload`
 - Homepage `/`: upload + mic record (MediaRecorder → WAV) hitting `/predict`.
 - Health: `GET /health`; Predict: `POST /predict` form-data `file` (wav/mp3/flac/webm/ogg).
-- Docs: `/docs`; OpenAPI: `/openapi.json`; Metrics: `/metrics` (Prometheus).
+- Model switch: `model_version` query atau header `X-Model-Version` dengan nilai `m1` (default) atau `m2`. Registries: `artifacts/registry/m1.json`, `artifacts/registry/m2.json`.
+- Docs: `/docs`; OpenAPI: `/openapi.json`; Metrics: `/metrics` (Prometheus) berlabel `model`.
 - Deploy: `https://orca-app-u6dem.ondigitalocean.app/`
 
 ## Model & Artefak Penting
